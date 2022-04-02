@@ -1,0 +1,5 @@
+# ignore all work resources (icons building, ...)
+/work-resources/*
+
+# ignore system files
+.DS_Store
