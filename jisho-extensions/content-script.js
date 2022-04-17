@@ -1,4 +1,3 @@
-
 function addExtensionResourcesStyleSheetToDOM() {
     const extensionResourcesStyleSheet = document.createElement("style")
     extensionResourcesStyleSheet.textContent = `
@@ -9,44 +8,40 @@ function addExtensionResourcesStyleSheetToDOM() {
     document.head.appendChild(extensionResourcesStyleSheet)
 }
 
-function loadConcept(id, callback) {
+async function loadConcept(id) {
     const loadingMessage = { 
         "event": "find",
         "savedConceptId": id 
     }
-    chrome.runtime.sendMessage(loadingMessage, function(response) {
-        callback(response.savedConcept)
-    })
+    const response = await chrome.runtime.sendMessage(loadingMessage)
+    const savedConcept = response.savedConcept ? response.savedConcept : undefined
+    return savedConcept
 }
 
-function saveConcept(concept, callback) {
+async function saveConcept(concept) {
     const savingMessage = { 
         "event": "save",
         "savedConcept": concept 
     }
-    chrome.runtime.sendMessage(savingMessage, function(response) {
-        if (response.isPersisted) {
-            concept.isSaved = true
-            callback()
-        } else {
-            console.error(`Impossible to save the concept "${concept.kanji}" (id:${concept.id})`)
-        }
-    })
+    const response = await chrome.runtime.sendMessage(savingMessage)
+    if (response.isPersisted) {
+        concept.isSaved = true
+    } else {
+        console.error(`Impossible to save the concept "${concept.kanji}" (id:${concept.id})`)
+    }
 }
 
-function forgetConcept(concept, callback) {
+async function forgetConcept(concept) {
     const removingMessage = { 
         "event": "remove",
         "savedConceptId": concept.id
     }
-    chrome.runtime.sendMessage(removingMessage, function(response) {
-        if (response.isRemoved) {
-            concept.isSaved = false
-            callback()
-        } else {
-            console.error(`Impossible to remove the concept "${concept.kanji}" (id:${concept.id})`)
-        }
-    })
+    const response = await chrome.runtime.sendMessage(removingMessage)
+    if (response.isRemoved) {
+        concept.isSaved = false
+    } else {
+        console.error(`Impossible to remove the concept "${concept.kanji}" (id:${concept.id})`)
+    }
 }
 
 function extractUnsavedConcept(id, conceptNode) {
@@ -88,12 +83,11 @@ function extractUnsavedConcept(id, conceptNode) {
     return extractedConcept
 }
 
-function getSavedConceptOrElseExtractFromDOM(conceptNode, callback) {
+async function getSavedConceptOrElseExtractFromDOM(conceptNode) {
     const id = extractIdFromConceptNode(conceptNode)
-    loadConcept(id, function(loadedConcept) {
-        const concept = loadedConcept ? loadedConcept : extractUnsavedConcept(id, conceptNode)
-        callback(concept)
-    })
+    const loadedConcept = await loadConcept(id)
+    const concept = loadedConcept ? loadedConcept : extractUnsavedConcept(id, conceptNode)
+    return concept
 }
 
 function extractIdFromConceptNode(conceptNode) {
@@ -103,7 +97,7 @@ function extractIdFromConceptNode(conceptNode) {
         .replace("links_drop_", "")
 }
 
-function createSaveOrForgetButton(concept) {
+async function createSaveOrForgetButton(concept) {
     const saveOrForgetButton = document.createElement("button")
     saveOrForgetButton.append(" ")
 
@@ -111,8 +105,9 @@ function createSaveOrForgetButton(concept) {
     tooltipText.className = "tooltiptext"
     saveOrForgetButton.appendChild(tooltipText)
 
-    const saveOnClick = function(buttonNode) {
-        saveConcept(concept, function() {
+    const saveOnClick = async function(buttonNode) {
+        await saveConcept(concept)
+        if (concept.isSaved) {
             buttonNode.className ="save-concept saved extention-tooltip"
             buttonNode.querySelector(".tooltiptext").innerText = 
                 `"${concept.kanji}" is saved
@@ -120,11 +115,14 @@ function createSaveOrForgetButton(concept) {
                 Click to remove this concept
                 from "export shipping list"`
             buttonNode.onclick = function() { forgetOnClick(this) }
-        })
+        } else {
+            console.error(`Button update not allowed for not saved concept: ${concept.kanji}`)
+        }
     }
     
-    const forgetOnClick = function(buttonNode) {
-        forgetConcept(concept, function() {
+    const forgetOnClick = async function(buttonNode) {
+        await forgetConcept(concept)
+        if (!concept.isSaved) {
             buttonNode.className ="save-concept unsaved extention-tooltip"
             buttonNode.querySelector(".tooltiptext").innerText = 
                 `"${concept.kanji}" is ignored
@@ -132,20 +130,22 @@ function createSaveOrForgetButton(concept) {
                 Click to save this concept
                 in "export shipping list"`
             buttonNode.onclick = function() { saveOnClick(this) }
-        })
+        } else {
+            console.error(`Button update not allowed for not forgotten concept: ${concept.kanji}`)
+        }
     }
 
     if(concept.isSaved) {
-        saveOnClick(saveOrForgetButton)
+        await saveOnClick(saveOrForgetButton)
     } else {
-        forgetOnClick(saveOrForgetButton)
+        await forgetOnClick(saveOrForgetButton)
     }
 
     return saveOrForgetButton
 }
 
-function addSaveOrForgetButtonToDOM(concept, conceptNode) {
-    const saveOrForgetButton = createSaveOrForgetButton(concept)
+async function addSaveOrForgetButtonToDOM(concept, conceptNode) {
+    const saveOrForgetButton = await createSaveOrForgetButton(concept)
     conceptNode
         .querySelector("div.concept_light-wrapper > div.concept_light-readings > div.concept_light-representation")
         .appendChild(saveOrForgetButton)
@@ -161,13 +161,14 @@ function newConceptNodes() {
         })
 }
 
-function addSaveButtonToNewConceptFound() {
-    newConceptNodes()
-        .forEach(function (conceptNode, index, arr) {
-            getSavedConceptOrElseExtractFromDOM(conceptNode, function(loadedOrExtractedConcept) {
-                addSaveOrForgetButtonToDOM(loadedOrExtractedConcept, conceptNode)
-            })
+async function addSaveButtonToNewConceptFound() {
+    const conceptNodes = newConceptNodes()
+    await Promise.all(
+        conceptNodes.map(async (conceptNode) => {
+            const loadedOrExtractedConcept = await getSavedConceptOrElseExtractFromDOM(conceptNode)
+            await addSaveOrForgetButtonToDOM(loadedOrExtractedConcept, conceptNode)
         })
+    )
 }
 
 // Initialization
@@ -178,8 +179,8 @@ addExtensionResourcesStyleSheetToDOM()
 addSaveButtonToNewConceptFound()
 
 // Check for updates
-var intervalID = setInterval(function () {
-    addSaveButtonToNewConceptFound()
+var intervalID = setInterval(async function () {
+    await addSaveButtonToNewConceptFound()
 }, 2500)
 
 // Done - Get ID : 

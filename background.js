@@ -20,34 +20,27 @@ function copyArrayWithNewElement(array, elementToAdd) {
     }
 }
 
-function saveConcept(concept, callback) {
+async function saveConcept(concept) {
     concept.isSaved = true
     const keyValue = {}
     keyValue[keyFromId(concept.id)] = concept
-    chrome.storage.sync.set(keyValue, function(){
-        callback()
-    })
+    await  chrome.storage.sync.set(keyValue)
 }
 
-function addToExportList(concept, callback) {
-    chrome.storage.sync.get("conceptsToExport", function(conceptIds) {
-        const exportIds = safeArrayFromResponse(conceptIds, "conceptsToExport")
-        copyArrayWithNewElement(exportIds, concept.id)
+async function addToExportList(concept) {
+    const conceptIds = await chrome.storage.sync.get("conceptsToExport")
 
-        const keyValue = {"conceptsToExport": exportIds}
-        chrome.storage.sync.set(keyValue, function() {
-            callback()
-        })
-    })
+    const exportIds = safeArrayFromResponse(conceptIds, "conceptsToExport")
+    copyArrayWithNewElement(exportIds, concept.id)
+
+    const keyValue = {"conceptsToExport": exportIds}
+    await chrome.storage.sync.set(keyValue)
 }
 
-function saveThenSendAsynchronousResponse(concept, sendResponse) {
-    saveConcept(concept, function(){
-        addToExportList(concept, function(){
-            sendResponse({isPersisted: true})
-        })
-    })
-    return true // Indicate the response will be asynchronous
+async function saveThenSendAsynchronousResponse(concept, sendResponse) {
+    await saveConcept(concept)
+    await addToExportList(concept)
+    sendResponse({isPersisted: true})
 }
 
 function removeConcept(conceptId, callback) {
@@ -68,33 +61,25 @@ function deleteFromExportList(conceptId, callback) {
     })
 }
 
-function removeThenSendAsynchronousResponse(conceptId, sendResponse) {
-    removeConcept(conceptId, function() {
-        deleteFromExportList(conceptId, function() {
-            sendResponse({isRemoved: true})
-        })
-    })
-    return true // Indicate the response will be asynchronous
+async function removeThenSendAsynchronousResponse(conceptId, sendResponse) {
+    await removeConcept(conceptId)
+    await deleteFromExportList(conceptId)
+    sendResponse({isRemoved: true})
 }
 
-function findThenSendAsynchronousResponse(conceptId, sendResponse) {
+async function findThenSendAsynchronousResponse(conceptId, sendResponse) {
     const key = keyFromId(conceptId)
-    chrome.storage.sync.get(key, function(maybeConcept){
-        const concept = maybeConcept[key] ? maybeConcept[key] : undefined;
-        sendResponse({"savedConcept": concept})
-    })
-    return true // Indicate the response will be asynchronous
+    const maybeConcept = await chrome.storage.sync.get(key)
+    const concept = maybeConcept[key] ? maybeConcept[key] : undefined
+    sendResponse({"savedConcept": concept})
 }
 
-function listThenSendAsynchronousResponse(sendResponse) {
-    chrome.storage.sync.get("conceptsToExport", function(conceptIds) {
-        const keys = conceptIds.conceptsToExport.map(id => keyFromId(id))
-        chrome.storage.sync.get(keys, function(conceptsByKeys){
-            const conceptsToExport = Object.entries(conceptsByKeys).map(( [key, value] ) => value)
-            sendResponse(conceptsToExport)
-        })
-    })
-    return true // Indicate the response will be asynchronous
+async function listThenSendAsynchronousResponse(sendResponse) {
+    const conceptIds = await chrome.storage.sync.get("conceptsToExport")
+    const keys = conceptIds.conceptsToExport.map(id => keyFromId(id))
+    const conceptsByKeys = await chrome.storage.sync.get(keys)
+    const conceptsToExport = Object.entries(conceptsByKeys).map(( [key, value] ) => value)
+    sendResponse(conceptsToExport)
 }
 
 // INITIALIZATION
@@ -106,15 +91,23 @@ chrome.runtime.onMessage.addListener(
     */
     (message, sender, sendResponse) => {
         if (message.event == "save") {
-            return saveThenSendAsynchronousResponse(message.savedConcept, sendResponse) // Do not remove the RETURN
+            saveThenSendAsynchronousResponse(message.savedConcept, sendResponse)
+            return true // Indicate the response will be asynchronous
         } else if (message.event == "remove") {
-            return removeThenSendAsynchronousResponse(message.savedConceptId, sendResponse) // Do not remove the RETURN
+            removeThenSendAsynchronousResponse(message.savedConceptId, sendResponse)
+            return true // Indicate the response will be asynchronous
         } 
         else if (message.event == "find") {
-            return findThenSendAsynchronousResponse(message.savedConceptId, sendResponse) // Do not remove the RETURN
+            findThenSendAsynchronousResponse(message.savedConceptId, sendResponse)
+            return true // Indicate the response will be asynchronous
         }
         else if (message.event == "list") {
-            return listThenSendAsynchronousResponse(sendResponse) // Do not remove the RETURN
+            listThenSendAsynchronousResponse(sendResponse)
+            return true // Indicate the response will be asynchronous
+        } else {
+            console.error(`Unknown event "${message.event}"`)
+            sendResponse()
+            return false
         }
   }
 )

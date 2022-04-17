@@ -1,11 +1,5 @@
-function logConceptsToExport(callback) {
-    chrome.runtime.sendMessage({"event": "list"}, function(conceptsToExport) {
-        if (Array.isArray(conceptsToExport)) {
-            callback(conceptsToExport)
-        } else {
-            console.error("Impossible to fetch concepts to export")
-        }
-    })
+async function listConceptsToExport() {
+    return await chrome.runtime.sendMessage({"event": "list"})
 }
 
 function prepareValueForExport(value) {
@@ -23,19 +17,21 @@ function fileContent(concepts) {
 }
 
 function prepareFileToDownload(concepts) {
-    downloadTriggerNode.download = "jisho2anki_export.csv";
-    const headersLine = '"";"";""\n'
-    downloadTriggerNode.href = `data:text/csv,${headersLine}${fileContent(concepts)}\n`
+    if (Array.isArray(concepts)) {
+        downloadTriggerNode.download = "jisho2anki_export.csv";
+        const headersLine = '"";"";""\n'
+        downloadTriggerNode.href = `data:text/csv,${headersLine}${fileContent(concepts)}\n`
+    } else {
+        console.error("Impossible to fetch concepts to export")
+    }
 }
-
 
 // INITIALIZATION
 const downloadTriggerNode = document.getElementById('hidden_download_trigger')
 const exportButton = document.getElementById('displayed_export_button')
 
-exportButton.onclick = function() {
-    logConceptsToExport( function (conceptsToExport) {
-        prepareFileToDownload(conceptsToExport)
-        downloadTriggerNode.click();
-    })
+exportButton.onclick = async function() {
+    const conceptsToExport = await listConceptsToExport()
+    prepareFileToDownload(conceptsToExport)
+    downloadTriggerNode.click()
 }
